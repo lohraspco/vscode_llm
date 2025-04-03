@@ -25,6 +25,10 @@ interface OllamaResponse {
     done: boolean;
 }
 
+interface MessageMap {
+    [key: string]: ChatMessage[];
+}
+
 class ChatTreeItem extends vscode.TreeItem {
     constructor(
         public readonly topic: ChatTopic,
@@ -620,7 +624,7 @@ function getWebviewContent(topics: ChatTopic[]) {
             const messageInput = document.getElementById('message-input');
             const topicSelect = document.getElementById('topic-select');
             let currentTopicId = topicSelect.value;
-            let messages = ${JSON.stringify(topics.reduce((acc, topic) => {
+            let messages = ${JSON.stringify(topics.reduce((acc: MessageMap, topic) => {
                 acc[topic.id] = topic.messages;
                 return acc;
             }, {}))};
