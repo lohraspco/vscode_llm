@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
+import { marked } from 'marked';
 
 const OLLAMA_API_URL = 'http://localhost:11434/api';
 
@@ -24,6 +25,43 @@ interface OllamaResponse {
     done: boolean;
 }
 
+class ChatTreeItem extends vscode.TreeItem {
+    constructor(
+        public readonly topic: ChatTopic,
+        public readonly collapsibleState: vscode.TreeItemCollapsibleState
+    ) {
+        super(topic.name, collapsibleState);
+        this.tooltip = `${topic.name} - ${topic.messages.length} messages`;
+        this.description = `${topic.messages.length} messages`;
+        this.command = {
+            command: 'ollama-gemma-assistant.openChat',
+            title: 'Open Chat',
+            arguments: [topic]
+        };
+    }
+}
+
+class ChatProvider implements vscode.TreeDataProvider<ChatTreeItem> {
+    private _onDidChangeTreeData: vscode.EventEmitter<ChatTreeItem | undefined | null | void> = new vscode.EventEmitter<ChatTreeItem | undefined | null | void>();
+    readonly onDidChangeTreeData: vscode.Event<ChatTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
+
+    constructor(private topics: ChatTopic[]) {}
+
+    refresh(): void {
+        this._onDidChangeTreeData.fire();
+    }
+
+    getTreeItem(element: ChatTreeItem): vscode.TreeItem {
+        return element;
+    }
+
+    getChildren(): ChatTreeItem[] {
+        return this.topics.map(topic => 
+            new ChatTreeItem(topic, vscode.TreeItemCollapsibleState.None)
+        );
+    }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     let chatPanel: vscode.WebviewPanel | undefined;
     let topics: ChatTopic[] = [];
@@ -44,11 +82,31 @@ export async function activate(context: vscode.ExtensionContext) {
         console.error('Error loading chats:', error);
     }
 
+    // Add a welcome message if no topics exist
+    if (topics.length === 0) {
+        const welcomeTopic: ChatTopic = {
+            id: Date.now().toString(),
+            name: 'Welcome',
+            messages: [{
+                text: 'Welcome to Gemma Assistant! Start a new chat by clicking the "New Topic" button.',
+                isUser: false,
+                isError: false,
+                time: new Date().toLocaleTimeString()
+            }],
+            createdAt: new Date().toISOString()
+        };
+        topics.push(welcomeTopic);
+        saveChats(topics, storagePath);
+    }
+
     // Create sidebar view
     const chatProvider = new ChatProvider(topics);
-    context.subscriptions.push(
-        vscode.window.registerTreeDataProvider('ollama-gemma-chats', chatProvider)
-    );
+    const treeView = vscode.window.createTreeView('ollama-gemma-chats', {
+        treeDataProvider: chatProvider,
+        showCollapseAll: false
+    });
+
+    context.subscriptions.push(treeView);
 
     // Register open chat command
     let openChatDisposable = vscode.commands.registerCommand('ollama-gemma-assistant.openChat', (topic: ChatTopic) => {
@@ -168,32 +226,6 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(startChatDisposable, editCodeDisposable, openChatDisposable);
 }
 
-class ChatProvider implements vscode.TreeDataProvider<ChatTopic> {
-    private _onDidChangeTreeData: vscode.EventEmitter<ChatTopic | undefined | null | void> = new vscode.EventEmitter<ChatTopic | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<ChatTopic | undefined | null | void> = this._onDidChangeTreeData.event;
-
-    constructor(private topics: ChatTopic[]) {}
-
-    refresh(): void {
-        this._onDidChangeTreeData.fire();
-    }
-
-    getTreeItem(element: ChatTopic): vscode.TreeItem {
-        const treeItem = new vscode.TreeItem(element.name);
-        treeItem.id = element.id;
-        treeItem.command = {
-            command: 'ollama-gemma-assistant.openChat',
-            title: 'Open Chat',
-            arguments: [element]
-        };
-        return treeItem;
-    }
-
-    getChildren(): ChatTopic[] {
-        return this.topics;
-    }
-}
-
 function saveChats(topics: ChatTopic[], storagePath: string) {
     try {
         fs.writeFileSync(storagePath, JSON.stringify(topics, null, 2));
@@ -234,6 +266,7 @@ function getWebviewContent(topics: ChatTopic[]) {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Gemma Chat</title>
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
             :root {
                 --primary-color: #2563eb;
@@ -367,51 +400,115 @@ function getWebviewContent(topics: ChatTopic[]) {
                 box-shadow: var(--shadow-md);
             }
 
-            #message-input {
-                flex: 1;
-                padding: 12px 16px;
-                border: 1px solid var(--border-color);
-                border-radius: 8px;
-                font-size: 14px;
-                outline: none;
-                transition: all 0.2s ease;
-                background-color: var(--input-bg);
-                color: var(--input-text);
+            .message-content {
+                line-height: 1.6;
+                white-space: pre-wrap;
+                word-wrap: break-word;
             }
 
-            #message-input::placeholder {
-                color: var(--input-placeholder);
+            .message-content pre {
+                background-color: #1e1e1e;
+                padding: 16px;
+                border-radius: 8px;
+                overflow-x: auto;
+                margin: 8px 0;
+            }
+
+            .message-content code {
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                background-color: #f3f4f6;
+                padding: 2px 4px;
+                border-radius: 4px;
+                font-size: 0.9em;
+            }
+
+            .message-content pre code {
+                background-color: transparent;
+                padding: 0;
+                color: #e5e7eb;
+            }
+
+            .message-content p {
+                margin: 8px 0;
+            }
+
+            .message-content ul, .message-content ol {
+                margin: 8px 0;
+                padding-left: 24px;
+            }
+
+            .message-content li {
+                margin: 4px 0;
+            }
+
+            .message-content blockquote {
+                border-left: 4px solid var(--primary-color);
+                margin: 8px 0;
+                padding-left: 16px;
+                color: #4b5563;
+            }
+
+            #message-input {
+                flex: 1;
+                padding: 16px;
+                border: 2px solid var(--border-color);
+                border-radius: 12px;
+                font-size: 14px;
+                outline: none;
+                transition: all 0.3s ease;
+                background-color: var(--input-bg);
+                color: var(--input-text);
+                min-height: 24px;
+                max-height: 200px;
+                resize: none;
+                line-height: 1.5;
+                font-family: inherit;
             }
 
             #message-input:focus {
                 border-color: var(--primary-color);
-                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+                box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
             }
 
-            button {
+            #message-input::placeholder {
+                color: var(--input-placeholder);
+                opacity: 0.7;
+            }
+
+            .send-button {
                 padding: 12px 24px;
                 background-color: var(--primary-color);
                 color: white;
                 border: none;
-                border-radius: 8px;
+                border-radius: 12px;
                 cursor: pointer;
                 font-size: 14px;
                 font-weight: 500;
-                transition: all 0.2s ease;
+                transition: all 0.3s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 80px;
             }
 
-            button:hover {
+            .send-button:hover {
                 background-color: var(--primary-hover);
                 transform: translateY(-1px);
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            }
+
+            .send-button:active {
+                transform: translateY(0);
             }
 
             .message {
-                margin-bottom: 16px;
-                padding: 16px;
-                border-radius: 12px;
+                margin-bottom: 24px;
+                padding: 20px;
+                border-radius: 16px;
                 max-width: 85%;
                 box-shadow: var(--shadow-sm);
                 position: relative;
+                line-height: 1.6;
             }
 
             .user-message {
@@ -439,8 +536,9 @@ function getWebviewContent(topics: ChatTopic[]) {
             .message-time {
                 font-size: 12px;
                 color: var(--message-time-color);
-                margin-top: 8px;
+                margin-top: 12px;
                 text-align: right;
+                opacity: 0.8;
             }
 
             .typing-indicator {
@@ -512,8 +610,8 @@ function getWebviewContent(topics: ChatTopic[]) {
             </div>
             <div id="chat-container"></div>
             <div id="input-container">
-                <input type="text" id="message-input" placeholder="Type your message...">
-                <button onclick="sendMessage()">Send</button>
+                <textarea id="message-input" placeholder="Type your message... (Shift + Enter for new line)" rows="1"></textarea>
+                <button class="send-button" onclick="sendMessage()">Send</button>
             </div>
         </div>
         <script>
@@ -527,6 +625,13 @@ function getWebviewContent(topics: ChatTopic[]) {
                 return acc;
             }, {}))};
 
+            // Configure marked for security
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                sanitize: true
+            });
+
             function formatTime() {
                 return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             }
@@ -536,7 +641,8 @@ function getWebviewContent(topics: ChatTopic[]) {
                 messageDiv.className = \`message \${isUser ? 'user-message' : isError ? 'error-message' : 'assistant-message'}\`;
                 
                 const messageContent = document.createElement('div');
-                messageContent.textContent = text;
+                messageContent.className = 'message-content';
+                messageContent.innerHTML = marked.parse(text);
                 messageDiv.appendChild(messageContent);
 
                 const timeDiv = document.createElement('div');
@@ -550,6 +656,20 @@ function getWebviewContent(topics: ChatTopic[]) {
                 messages[currentTopicId].push({ text, isUser, isError, time: formatTime() });
                 saveMessages();
             }
+
+            // Auto-resize textarea
+            messageInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = (this.scrollHeight) + 'px';
+            });
+
+            // Handle Shift+Enter for new line
+            messageInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
 
             function saveMessages() {
                 vscode.postMessage({
@@ -615,15 +735,10 @@ function getWebviewContent(topics: ChatTopic[]) {
                     });
                     
                     messageInput.value = '';
+                    messageInput.style.height = 'auto';
                     return typingIndicator;
                 }
             }
-
-            messageInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    sendMessage();
-                }
-            });
 
             window.addEventListener('message', event => {
                 const message = event.data;

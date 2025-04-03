@@ -1,7 +1,7 @@
 {
   "name": "ollama-gemma-assistant",
-  "displayName": "Ollama Gemma Assistant",
-  "description": "VSCode extension that integrates Ollama's Gemma model for chatting and code editing",
+  "displayName": "Gemma Assistant",
+  "description": "Chat with Gemma using Ollama in VS Code",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.85.0"
@@ -9,17 +9,26 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:ollama-gemma-assistant.startChat",
+    "onCommand:ollama-gemma-assistant.editCode",
+    "onView:ollama-gemma-chats"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "ollama-gemma-assistant.startChat",
-        "title": "Start Chat with Gemma"
+        "title": "Start Chat"
       },
       {
         "command": "ollama-gemma-assistant.editCode",
         "title": "Edit Code with Gemma"
+      },
+      {
+        "command": "ollama-gemma-assistant.openChat",
+        "title": "Open Chat",
+        "category": "Gemma Assistant"
       }
     ],
     "viewsContainers": {
@@ -35,7 +44,9 @@
       "ollama-gemma-sidebar": [
         {
           "id": "ollama-gemma-chats",
-          "name": "Chats"
+          "name": "Chats",
+          "type": "tree",
+          "when": "true"
         }
       ]
     }
@@ -50,13 +61,14 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.85.0",
-    "@types/node": "^20.11.0",
-    "@typescript-eslint/eslint-plugin": "^6.19.0",
-    "@typescript-eslint/parser": "^6.19.0",
+    "@types/node": "18.x",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
     "eslint": "^8.56.0",
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "axios": "^1.6.7"
+    "axios": "^1.6.2",
+    "marked": "^11.1.1"
   }
-} 
+}
